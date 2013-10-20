@@ -1,0 +1,86 @@
+ServerTokens Prod
+Timeout 30 
+KeepAlive On
+MaxKeepAliveRequests 200
+KeepAliveTimeout 1
+UseCanonicalName Off
+HostnameLookups Off
+ExtendedStatus On
+HostnameLookups Off
+EnableMMAP off
+EnableSendfile off
+
+<IfModule mpm_prefork_module>
+	StartServers       8
+	MinSpareServers    5
+	MaxSpareServers   20
+	ServerLimit      256
+	MaxClients       256
+	MaxRequestsPerChild  4000
+</IfModule>
+
+<IfModule mpm_worker_module>
+	StartServers         2
+	MaxClients         150
+	MinSpareThreads     25
+	MaxSpareThreads     75 
+	ThreadsPerChild     25
+	MaxRequestsPerChild  0
+</IfModule>
+
+<Directory /var/www>
+        Options -Indexes
+</Directory>
+
+<IfModule mod_status.c>
+    ExtendedStatus On
+    <Location /server-status>
+        SetHandler server-status
+        Order deny,allow
+        Deny from all
+        Allow from localhost
+    </Location>
+</IfModule>
+
+<ifModule mod_expires.c>
+    # Static
+    <FilesMatch "(?i)^.*\.(pdf|flv|jpe?g|bmp|png|gif|swf|ico|js|css|svg|PDF|FLV|JPE?G|BMP|PNG|GIF|SWF|ICO|JS|CSS)$">
+	ExpiresActive On
+	ExpiresDefault "access plus 2 hours"
+	<IfModule mod_headers.c>
+	    Header set Cache-Control "max-age=7200, must-revalidate"
+	    Header unset ETag
+        </IfModule>
+    </FilesMatch>
+
+    # Html
+    <ProxyMatch "\.(html|htm|HTML|HTM)$">
+        ExpiresActive On
+	ExpiresDefault "access plus 2 hours"
+        <IfModule mod_headers.c>
+    	    Header set Cache-Control "max-age=7200, must-revalidate"
+	    Header unset ETag
+        </IfModule>
+    </ProxyMatch>
+</ifmodule>
+
+<ifModule mod_deflate.c>
+    DeflateCompressionLevel 9
+    DeflateFilterNote ratio
+    BrowserMatch ^Mozilla/4 gzip-only-text/html
+    BrowserMatch ^Mozilla/4\.0[678] no-gzip
+    BrowserMatch \bMSIE !no-gzip !gzip-only-text/html
+    <IfModule mod_headers.c>
+        Header append Vary User-Agent env=!dont-vary
+    </IfModule>
+    AddOutputFilterByType DEFLATE text/html text/css
+    AddOutputFilterByType DEFLATE text/plain text/xml text/css
+    AddOutputFilterByType DEFLATE text/javascript application/x-javascript application/javascript application/rss+xml application/json
+
+    <FilesMatch "(?i)^.*\.(js|css|html|htm|php|xml|json|svg|ttf|JS|CSS|HTML|HTM|PHP|XML|JSON|SVG|TTF)$">
+        SetOutputFilter DEFLATE
+    </FilesMatch>
+</IfModule>
+
+FileEtag none
+AddDefaultCharset off

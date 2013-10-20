@@ -1,0 +1,11 @@
+class { 'drupal::drush': }
+drupal::install { "7.0" : 
+    def_drupal_user => 'user_app-5f5da13',
+    def_drupal_pass => 'account_password',
+    def_drupal_title	=> 'Site',
+    def_db_name => 'wp_db_app-5f5da12',
+    def_db_user => 'user_app-5f5da13',
+    def_db_password => 'password',
+    def_install_dir => '/var/www/app-5f5da12',
+}
+

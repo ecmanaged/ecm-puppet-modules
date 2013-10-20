@@ -1,0 +1,73 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          ecm-loadb-api
+# Required-Start:    $network $named $remote_fs $syslog
+# Required-Stop:     $network $named $remote_fs $syslog
+# Should-Start:      ecm-loadb-api
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: ecm-loadb-api agent
+# Description:       RESTful API to control ecm-loadb
+### END INIT INFO                                                                                                                                          
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+DAEMON=/usr/local/ecmanaged/ecm-loadb-api/init.py
+DAEMON_OPTS=""
+NAME="ecm-loadb-api"
+DESC="ecm-loadb-api agent"
+PIDFILE="/var/run/${NAME}.pid"
+
+test -x $DAEMON || exit 0
+
+[ -r /etc/default/ecm-loadb-api ] && . /etc/default/ecm-loadb-api
+
+. /lib/lsb/init-functions
+
+reload() {
+	start-stop-daemon --stop --quiet --signal HUP --pidfile $PIDFILE 
+}
+
+start() {
+	start-stop-daemon --start --quiet --background --pidfile $PIDFILE \
+	    --startas $DAEMON -- $NAME $DAEMON_OPTS
+}
+
+stop() {
+	start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE
+}
+
+status() {
+	status_of_proc -p "${PIDFILE}" "${DAEMON}" "${NAME}"
+}
+
+case "$1" in
+    start)
+	log_begin_msg "Starting $DESC"
+	start
+	log_end_msg $?
+	;;
+    stop)
+	log_begin_msg "Stopping $DESC"
+	stop
+	log_end_msg $?
+	;;
+    reload)
+    	log_begin_msg "Reloading $DESC"
+        reload
+    	log_end_msg $?
+    	;;
+    status)
+        status
+	;;
+    restart|force-reload)
+	log_begin_msg "Restarting $DESC"
+	stop
+	sleep 1
+	start
+	log_end_msg $?
+	;;
+  *)
+	echo "Usage: $0 {start|stop|status|restart|force-reload|reload}" >&2
+	exit 1
+	;;
+esac

@@ -1,0 +1,53 @@
+if ! $::osfamily {
+    case $::operatingsystem {
+        'RedHat', 'Fedora', 'CentOS', 'Scientific', 'SLC', 'Ascendos', 'CloudLinux', 'PSBM', 'OracleLinux', 'OVS', 'OEL': {
+          $osfamily = 'RedHat'
+        }
+        'ubuntu', 'debian': {
+          $osfamily = 'Debian'
+        }
+        'SLES', 'SLED', 'OpenSuSE', 'SuSE': {
+          $osfamily = 'Suse'
+        }
+        'Solaris', 'Nexenta': {
+          $osfamily = 'Solaris'
+        }
+        default: {
+          $osfamily = $::operatingsystem
+        }
+    }
+}
+
+if ! $::kernel {
+	$kernel = 'linux'
+}
+
+class ecmanaged::ecm-base {
+	$motd_text = "
+Hi, this is your instance pre-configured by:
+                                                      _ 
+  ___  ___ _ __ ___   __ _ _ __   __ _  __ _  ___  __| |
+ / _ \/ __| '_ ` _ \ / _` | '_ \ / _` |/ _` |/ _ \/ _` |
+|  __/ (__| | | | | | (_| | | | | (_| | (_| |  __/ (_| |
+ \___|\___|_| |_| |_|\__,_|_| |_|\__,_|\__, |\___|\__,_|
+                                       |___/            
+
+It is running ${operatingsystem} and ECM Agent 1.1.
+
+You can use ECM enviroment variables by typing:
+    source /etc/ecmanaged/ecm_env
+
+(if you don't want to see this message again, just empty /etc/motd.tail)
+
+"
+
+    class { 'ecmanaged::ecm-firewall::clean': }
+    class { 'ecmanaged::ecm-ntp': }
+#    motd { 'default': text	=> $motd_text }
+    file {'motd':
+      ensure  => file,
+      path    => '/etc/motd.tail',
+      mode    => 0644,
+      content => $motd_text
+    }
+}

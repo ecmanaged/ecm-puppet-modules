@@ -1,0 +1,11 @@
+# Changes by JCM:
+#
+# app.pp:
+#	changes /opt/wordpress by ${wordpress:wp_install_dir}
+# 	delete references to apache, mysql and php
+# db.pp:
+#	delete references to install mysql
+#	use wordpress::db_root_password
+# FINALY: delete db.pp not used
+#
+# wordpress.zip eliminar base directory wordpress

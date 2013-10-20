@@ -1,0 +1,5 @@
+server {
+  listen                <%= listen_ip %>:<%= listen_port %>
+  server_name           <%= rewrite_www_to_non_www ? name.gsub(/^www\./, '') : server_name.join(" ") %>;
+  access_log            <%= nginx_log_dir =%>/<%= name %>.access.log upstreamlog;
+

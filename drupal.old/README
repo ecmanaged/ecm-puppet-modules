@@ -1,0 +1,6 @@
+Puppet module for Drupal
+========================
+
+This module needs puppet-pear (available at git.sarava.org) to be included
+before puppet-drupal.
+

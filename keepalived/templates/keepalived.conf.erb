@@ -1,0 +1,76 @@
+## MANAGED BY PUPPET ##
+
+global_defs {
+   notification_email {
+<% notification_email.each do |email| -%>
+    <%= notification_email %>
+<% end -%>
+   }
+   notification_email_from keepalived@<%= fqdn %>
+
+   smtp_server <%= smtp_server %>
+   smtp_connect_timeout 10
+
+   lvs_id <%= fqdn %>
+} # END global_defs
+
+vrrp_sync_group VG1 {
+    group {
+<% vrrp_instances.keys.each do |instance| -%>
+        <%= instance %>
+<% end -%>
+    }
+}
+
+<% vrrp_instances.each do |instance,config| -%>
+vrrp_instance <%= instance -%> {
+    state <%= state %>
+    interface <%= config['interface'] %>
+    virtual_router_id <%= config['router_id'] %>
+    lvs_sync_daemon_interface <%= config['interface'] %>
+    priority <%= priority %>
+    advert_int 1
+    smtp_alert
+    authentication {
+        auth_type <%= config['auth_type'] %>
+        auth_pass <%= config['auth_pass'] %>
+        }
+    virtual_ipaddress {
+        <%= config['vip'] %>
+    }
+}
+<% end -%>
+
+<% virtual_server_groups.each do |group,config| -%>
+virtual_server_group <%= group -%> {
+    <%= config['ip'] %> <%= config['port'] %>
+<% if config['additional_services'] -%>
+<% config['additional_services'].each do |service| -%>
+    <%= service %>
+<% end -%>
+<% end -%>
+}
+
+virtual_server group <%= group -%> {
+<% config['params'].each do |key,value| -%>
+    <%= key %> <%= value %>
+<% end -%>
+
+<% config['real_servers'].each do |name,rs| %>
+    # <%= name %>
+    real_server <%= rs['ip'] %> <%= rs['port'] %>{
+        weight: <%= rs['weight'] %>
+        <%= rs['check'] %> {
+            connect_timeout <%= rs['connect_timeout'] %>
+            retry <%= rs['retry'] %>
+            delay_before_retry <%= rs['delay_before_retry'] %>
+            helo_name "<%= rs['helo_name'] %>"
+            host {
+                connect_ip <%= rs['ip'] %>
+                connect_port <%= rs['connect_port'] %>
+            }
+        }
+    }
+<% end -%>
+<% end -%>
+}

@@ -1,0 +1,398 @@
+#!/bin/bash
+#
+# Drupal management script.
+#
+
+SITES="<%= apache_sites_folder %>"
+BASE="<%= apache_www_folder %>"
+SERIES="5 6 7"
+
+# Read a parameter from user
+function drupal_user_input {
+  local input
+  param="$1"
+  default="$2"
+  shift 2
+
+  if echo $param | grep -q 'passwd'; then
+    read -s -rep "$* (defaults to $default): " input
+  else
+    read -rep "$* (defaults to $default): " input
+  fi
+
+  if [ -z "$input" ]; then
+    export $param="$default"
+  else
+    export $param="$input"
+  fi
+}
+
+# Get drupal major version
+function drupal_get_major {
+  echo $1 | sed -e 's/\(^.\).*/\1/'
+}
+
+# Check for existing installations
+function drupal_check_existing {
+  if [ -e "$BASE/drupal-$1" ]; then
+    echo "Folder $BASE/drupal-$1 already exists, skipping"
+    exit 1
+  fi  
+}
+
+# Check for non existing installations
+function drupal_check_not_existing {
+  if [ ! -e "$BASE/drupal-$1" ]; then
+    echo "Folder $BASE/drupal-$1 does not exist, skipping"
+    exit 1
+  fi  
+}
+
+# Iterate through all drupal instances
+function drupal_iterate {
+  for version in $SERIES; do
+    # Setup base folder
+    base="$BASE/drupal-$version"
+
+    if [ ! -d "$base/sites" ]; then
+      continue
+    fi
+
+    # Setup site folders with .onion sites in the end of the list
+    # and ignoring site names without dots
+    cd $base/sites
+    drupals="`ls -1 -I default -I all -I example.sites.php -I '*.onion' | grep "\." | xargs`"
+    drupals="$drupals `ls -1 | grep '.onion$' | xargs`"
+  
+    # Issue updates
+    for drupal in $drupals; do
+      if [ -e "$drupal/settings.php" ]; then
+        hash="`sha1sum $drupal/settings.php | cut -d ' ' -f 1`"
+        # Process sites just once, avoiding symlinks
+        if echo $settings_hash | grep -q -v $hash; then
+          settings_hash="$settings_hash-$hash"
+          if [ "$1" != "cron" ]; then
+            echo "Processing $drupal..."
+          fi
+          drush -l $drupal $*
+        fi
+      fi
+    done
+  
+    # Fix permissions
+    if [ -e "$base/sites/all/modules" ]; then
+      chown -R root.root $base/sites/all/modules
+    fi
+    if [ -e "$base/sites/all/themes" ]; then
+      chown -R root.root $base/sites/all/themes
+    fi
+  done
+}
+
+# Deploy a fresh drupal tree
+function drupal_deploy {
+  if [ -z "$1" ]; then
+    echo "Usage: `basename $0` deploy <version> [--upgrade]"
+    exit 1
+  fi
+
+  # Setup
+  new="$1"
+  drupal_series="`drupal_get_major $new`"
+  cd $BASE
+  drupal_check_existing $new
+
+  # Deploy a fresh drupal tree
+  wget http://ftp.drupal.org/files/projects/drupal-$new.tar.gz
+  tar zxvf drupal-$new.tar.gz && rm drupal-$new.tar.gz
+  chown -R root.root drupal-$new/
+
+  # Upgrade mode, erase sites folder as the previous should be copied.
+  if [ "$2" == "--upgrade" ]; then
+    cd drupal-$new && rm -rf sites
+  fi
+
+  # Make symlink if needed.
+  if [ ! -e "$BASE/drupal-$drupal_series/CHANGELOG.txt" ]; then
+    # Deal with a possibly empty drupal folder
+    rmdir $BASE/drupal-$drupal_series &> /dev/null
+    ( cd $BASE && ln -s drupal-$new drupal-$drupal_series )
+  fi
+}
+
+# Upgrade a drupal instance using upstream source
+function drupal_upgrade {
+  if [ "$#" != "2" ]; then
+    echo "Usage: `basename $0` upgrade <old_version> <new_version>"
+    exit 1
+  fi
+
+  # Setup
+  old="$1"
+  new="$2"
+  old_major="`drupal_get_major $old`"
+  new_major="`drupal_get_major $new`"
+  extra_folders=""
+  
+  if [ "$old_major" != "$new_major" ]; then
+    echo "Major versions doesn't match"
+    exit 1
+  fi
+
+  drupal_check_existing $new
+  drupal_check_not_existing $old
+  
+  # Set drupal series
+  if [ "$new_major" == "4" ]; then
+    # Get minor versions
+    new_minor="`echo $new | sed -e "s/^$new_major\.//"`"
+    old_minor="`echo $old | sed -e "s/^$old_major\.//"`"
+  
+    if [ "$old_minor" != "$new_minor" ]; then
+      echo "Minor versions doesn't match"
+      exit 1
+    fi
+    drupal_series="$new_major.$new_minor"
+  else
+    drupal_series="$new_major"
+  fi
+  
+  cd $BASE
+  
+  # Deploy a fresh drupal tree
+  drupal_deploy $new --upgrade
+
+  # Ensure we're in the new drupal folder
+  cd $BASE/drupal-$new
+
+  # Copy files
+  for file in .htaccess favicon.ico files sites; do
+    if [ ! -h "../drupal-$old/$file" ]; then
+      cp -a ../drupal-$old/$file . &> /dev/null
+    else
+      # Symlink handling
+      ln -sf $file `readlink ../drupal-$old/$file`
+    fi
+  done
+
+  # Extra folder
+  for extra_folder in $extra_folders; do
+    if [ -d ../drupal-$old/$extra_folder ]; then
+      cp -Rp ../drupal-$old/$extra_folder .
+    fi
+  done
+  
+  # Legacy stuff for Drupal 4.x.x
+  if [ "$new_major" == "4" ]; then
+    rsync -av ../drupal-$old/themes/ themes/
+    for module in `ls ../drupal-$old/modules`; do
+      if [ -d "../drupal-$old/modules/$module" ]; then
+        cp -Rp ../drupal-$old/modules/$module modules/
+      fi
+    done
+  fi
+  
+  # Copy installation profiles for Drupal 5.x or newer
+  if [ "$new_major" != "4" ]; then
+    rsync -av --exclude=default ../drupal-$old/profiles/ profiles/
+  fi
+
+  # Misc: copy image.imagemagick.inc to includes/ folder
+  if [ -e "../drupal-$old/sites/all/modules/image/image.imagemagick.inc" ]; then
+    cp ../drupal-$old/sites/all/modules/image/image.imagemagick.inc includes/
+  fi
+
+  # Modules that need stuff in the root folder
+  if [ -d "sites/all/modules/chatroom" ]; then
+    ln -s sites/all/modules/chatroom/chatroomread.php
+  fi
+  
+  # Change symlink to point to the new location
+  cd $BASE ; rm -rf drupal-$drupal_series && ln -s drupal-$new drupal-$drupal_series
+
+  # Done
+  echo "Audit: `du -hs drupal-$old`"
+  echo "Audit: `du -hs drupal-$new`"
+  echo "Check procedure and remove drupal-$old once you make sure that everything is fine."
+}
+
+# Run a drupal makefile
+function drupal_make {
+  if [ -z "$1" ]; then
+    echo "Usage: `basename $0` make <series>"
+    exit 1
+  fi
+
+  series="$1"
+  base="$BASE/drupal-$series"
+  makefile="/usr/local/share/drupal/drupal$series.make"
+  makefile_themes="/usr/local/share/drupal/themes$series.make"
+
+  if [ -e "$makefile" ]; then
+    if [ ! -e "$base" ]; then
+      echo "Please deploy drupal code at $base first"
+      exit 1
+    fi
+    drush dl drush_make
+    ( cd $base && drush make -y --no-core $makefile )
+    ( cd $base && drush make -y --no-core $makefile_themes )
+  else
+    echo "Makefile not found: $makefile"
+    exit 1
+  fi
+}
+
+# Run the video scheduler
+function drupal_video_scheduler {
+  if [ -z "$2" ]; then
+    echo "Usage: `basename $0` video-scheduler <site> <series>"
+    exit 1
+  fi
+
+  site="$1"
+  version="$2"
+  drupal_folder="$BASE/drupal-$version"
+  scheduler="$drupal_folder/sites/all/modules/video/video_scheduler.php"
+  site_folder="$drupal_folder/sites/$site"
+
+  if [ -f "$scheduler" ] && [ -e "$site" ]; then
+    php $scheduler -r $drupal_folder -s $site
+  fi
+}
+
+# Install a new instance
+function drupal_install {
+  if [ -z "$2" ]; then
+    echo "Usage: `basename $0` install <series> <name> [aliases]"
+    exit 1
+  fi
+
+  # Required arguments
+  series="$1"
+  site="$2"
+  shift 2
+
+  # Site aliases
+  aliases="$*"
+
+  # Other parameters
+  domain="`facter domain`"
+
+  # Installation parameters
+  drupal_user_input name        "$site"                    "Site name"
+  drupal_user_input site_email  "$site@$domain"            "Site email"
+  drupal_user_input profile     "standard"                 "Installation profile"
+  drupal_user_input locale      "pt-br"                    "Installation language"
+  drupal_user_input admin       "$site"                    "Admin user"
+  drupal_user_input admin_email "$admin@$domain"           "Admin email"
+
+  if [ -e "$BASE/drupal-$series/sites/$site" ]; then
+    echo "Drupal $site already installed at $BASE/drupal-$series"
+    echo "Installation will be overwritten"
+  else
+    # Check installation
+    if [ ! -e "$BASE/drupal-$series" ]; then
+      echo "Please deploy your drupal $series farm first"
+      exit 1
+    fi  
+
+    echo "Creating $SITES/$site/drupal/ structure..."
+    mkdir -p $SITES/$site/drupal/files
+
+    echo "Copying default configuration file..."
+    cp $BASE/drupal-$series/sites/default/default.settings.php $SITES/$site/drupal/settings.php
+    chmod 640 $SITES/$site/drupal/settings.php
+
+    (
+    echo "Creating symlinks..."
+    cd $BASE/drupal-$series/sites
+    ln -s $SITES/$site/drupal $site
+    ln -s $SITES/$site/drupal $site.$domain
+
+    for alias in $aliases; do
+      ln -s $SITES/$site/drupal $alias
+    done
+    )
+
+    # Aditional parameters
+    drupal_user_input dbname      "$site"                    "Database name"
+    drupal_user_input dbuser      "$site"                    "Database user"
+    drupal_user_input dbpasswd    "$site"                    "Database passwd"
+    echo ""
+
+    echo "Configuring settings.php"
+    if [ "$series" == "7" ]; then
+      cat >> $SITES/$site/drupal/settings.php <<-EOF
+\$databases['default']['default'] = array(
+'driver'   => 'mysql',
+'database' => '$dbname',
+'username' => '$dbuser',
+'password' => '$dbpasswd',
+'host'     => 'localhost',
+'prefix'   => '',
+);
+EOF
+    elif [ "$series" == "6" ]; then
+      cat >> $SITES/$site/drupal/settings.php <<-EOF
+\$db_url = 'mysql://$dbuser:$dbpasswd@localhost/$dbname';
+EOF
+    fi
+  fi
+
+  (
+  echo "Installing drupal $series for $site using $profile profile..."
+  cd $BASE/drupal-$series/
+  drush site-install $profile --site-name="$name" --site-mail="$site_email" --locale=$locale \
+    --uri="$site" --sites-subdir="$site" --account-name="$admin" --account-mail="$admin_email"
+  )
+
+  # Fix permissions
+  if grep -qe "^$site:" /etc/passwd; then
+    chown root.$site  $SITES/$site/drupal/settings.php
+    chown $site.$site $SITES/$site/drupal/files
+  else
+    chown root.www-data     $SITES/$site/drupal/settings.php
+    chown www-data.www-data $SITES/$site/drupal/files
+  fi
+
+  echo "Done. Please check your installation."
+}
+
+# Main procedure
+if [ -z "$1" ]; then
+  echo "Usage: `basename $0` <cron|deploy|update|updatedb|upgrade|run|make|video-scheduler|install> [arguments]"
+  exit 1
+elif [ "$1" == "cron" ]; then
+  drupal_iterate cron
+elif [ "$1" == "deploy" ]; then
+  shift
+  drupal_deploy $*
+elif [ "$1" == "update" ]; then
+  shift
+  drupal_iterate pm-update $*
+
+  # Update alone might not trigger updatedb in a farm for all instances.
+  drupal_iterate updatedb $*
+  drupal_iterate cc all $*
+elif [ "$1" == "updatedb" ]; then
+  shift
+  drupal_iterate updatedb $*
+elif [ "$1" == "upgrade" ]; then
+  shift
+  drupal_upgrade $*
+elif [ "$1" == "run" ]; then
+  shift
+  drupal_iterate $*
+elif [ "$1" == "make" ]; then
+  shift
+  drupal_make $*
+elif [ "$1" == "video-scheduler" ]; then
+  shift
+  drupal_video_scheduler $*
+elif [ "$1" == "install" ]; then
+  shift
+  drupal_install $*
+else
+  echo "No action $1"
+  exit 1
+fi

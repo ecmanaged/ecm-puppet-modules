@@ -1,0 +1,36 @@
+ServerTokens Prod
+Timeout 60
+KeepAlive On
+MaxKeepAliveRequests 400
+KeepAliveTimeout 3
+
+<IfModule prefork.c>
+	StartServers       8
+	MinSpareServers    5
+	MaxSpareServers   20
+	ServerLimit      256
+	MaxClients       256
+	MaxRequestsPerChild  4000
+</IfModule>
+
+<IfModule worker.c>
+	StartServers         2
+	MaxClients         150
+	MinSpareThreads     25
+	MaxSpareThreads     75 
+	ThreadsPerChild     25
+	MaxRequestsPerChild  0
+</IfModule>
+
+ExtendedStatus On
+HostnameLookups Off
+EnableMMAP off
+EnableSendfile off
+
+<Location /server-status>
+    SetHandler server-status
+    Order deny,allow
+    Deny from all
+    Allow from localhost
+</Location>
+
